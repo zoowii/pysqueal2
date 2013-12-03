@@ -1,244 +1,175 @@
-""" Module squeal: table and database manipulation functions.
-
-The meanings of "table" and "database" are as described in db_io.py.
-"""
-
-# Write your Cartesian product function and all your other helper functions
-# here.
-import re
 import db_io
 
 
-class Query(object):
+def split_text_before(text, word):
     """
-    query of the squeal language compiled from input text
+    get the text before word(or None) with the remaining
+    eg. get text before ' from '/' where ' keyword with the remaining
     """
-    type = 'multi'
-    items = []
-    where_type = None  # column, string
-    table = None  # table of last query result or None, and the result table store here
-
-    def __init__(self, type='multi'):
-        self.type = type
-        self.items = []
-
-    def __repr__(self):
-        s = 'Query<%s>\n' % self.type
-        if self.type == 'where':
-            s += "where type: %s" % self.where_type + '\n'
-        for item in self.items:
-            s += repr(item) + '\n'
-        return s
-
-    def sort_clauses(self):
-        """
-        sort the sub queries if the query's type is multi
-        the order is from, where, select if exists
-        """
-        if self.type != 'multi':
-            return
-        if len(self.items) <= 1:
-            return
-        sort_range = {
-            'from': 1,
-            'where': 2,
-            'select': 3
-        }
-
-        self.items.sort(key=lambda x: sort_range[x.type])
-
-    def execute(self):
-        """
-        return table of the query result
-        params query the Query object compiled
-        """
-        if self.type != 'multi':
-            print("error query type, not multi")
-            return
-        table = None
-        for query in self.items:
-            query.table = table
-            table = query.execute()
-        return table
+    if word is None:
+        return [text, '']
+    pos = text.find(word)
+    if pos < 0:
+        return [text, '']
+    return [text[:pos], text[pos + len(word):]]
 
 
-class FromQuery(Query):
-    type = 'from'
+def get_columns_of_table(table):
+    return list(table.keys())
 
-    def read_tables(self):
-        """
-        read table in from clause
-        if self.items are not string, but Query object or Table(dict), then just return them
-        """
-        db = db_io.read_database()
-        tables = list()
-        for i in range(len(self.items)):
-            item = self.items[i]
-            if isinstance(item, Query):
-                item.table = self.table
-                tables.append(item.execute())
-            elif isinstance(item, dict):
-                tables.append(item)
-            elif isinstance(item, str):
-                tables.append(db[item])
-            else:
-                print('error in from clause')
-        return tables
 
-    def execute(self):
-        """
-        read and/or product tables and return the result
-        """
-        tables = self.read_tables()
-        if len(tables) == 1:
-            return tables[0]
-        elif len(tables) == 2:
-            return cartesian_product(tables[0], tables[1])
+def get_size_of_table(table):
+    return len(table[get_columns_of_table(table)[0]])
+
+
+def get_rows_of_table(table):
+    """
+    return rows of table like ['value1', 'value2', 'value3']
+    """
+    columns = get_columns_of_table(table)
+    rows = []
+    for i in range(get_size_of_table(table)):
+        row = []
+        for col in columns:
+            row.append(table[col][i])
+        rows.append(row)
+    return rows
+
+
+def get_key_rows_of_table(table):
+    """
+    return rows of table like {'column1':'value1','column2':'value2'}
+    """
+    columns = get_columns_of_table(table)
+    rows = []
+    for i in range(get_size_of_table(table)):
+        row = {}
+        for col in columns:
+            row[col] = table[col][i]
+        rows.append(row)
+    return rows
+
+
+def where_execute(sql_str):
+    """
+    return a funtion witch accept a table and return filtered table back
+    execute the where sub query.
+    just return a function as judgement
+    """
+    import re
+
+    sql_str = sql_str.strip()
+    where_type = 'no_string'
+    if sql_str[-1] == "'":
+        where_type = 'string'
+    identity_re = r'[a-zA-Z0-9\.]+'
+    c1 = re.match(identity_re, sql_str).group()
+    remaining_str = sql_str[sql_str.find(c1) + len(c1):].strip()
+    op = remaining_str[0]
+    remaining_str = remaining_str[1:].strip()
+    c2 = remaining_str
+    if where_type == 'string':
+        c2 = remaining_str[1:-1]
+
+    def is_row_match(cols, row, key_row):
+        value1 = key_row[c1]
+        if where_type == 'string':
+            value2 = c2
         else:
-            print("error in from clause, too more from tables")
-            return None
-
-
-class SelectQuery(Query):
-    type = 'select'
-
-    def execute(self):
-        if self.items[0] == '*':
-            return self.table
-        result_table = dict()
-        for key in self.items:
-            result_table[key] = self.table[key]
-        return result_table
-
-
-class WhereQuery(Query):
-    def execute(self):
-        """
-        fetch rows from table which match the where condition
-        """
-        result_table = dict()
-        for key in self.table.keys():
-            result_table[key] = []
-        for i in range(count_table_size(self.table)):
-            row = self.get_row(i)
-            if self.match_condition(row):
-                insert_row_to_table(result_table, row)
-        return result_table
-
-    def get_row(self, row_index):
-        """
-        get row of row_index in self.table
-        """
-        row = dict()
-        for k in self.table.keys():
-            row[k] = self.table[k][row_index]
-        return row
-
-    def match_condition(self, row):
-        """
-        row is one row in self.table, check where the row matches the where condition
-        """
-        value1 = row[self.items[0]]
-        if self.where_type == 'column':
-            value2 = row[self.items[2]]
-        elif self.where_type == 'string':
-            value2 = self.items[2]
+            value2 = key_row[c2]
+        if op == '=':
+            return value1 == value2
+        elif op == '>':
+            return value1 > value2
         else:
-            print("unsupported where type")
-            return None
-        op = self.items[1]
-        return (op == '=' and value1 == value2) or (op == '>' and value1 > value2)
+            print('error happen in where sub-query')
+            return 'error'
+
+    def where_filter(table):
+        cols = get_columns_of_table(table)
+        rows = get_rows_of_table(table)
+        key_rows = get_key_rows_of_table(table)
+        result_rows = []
+        for i in range(len(rows)):
+            row = rows[i]
+            key_row = key_rows[i]
+            if is_row_match(cols, row, key_row):
+                result_rows.append(row)
+        return db_io.make_table_with_columns_and_rows(cols, result_rows)
+
+    return where_filter
 
 
 def cartesian_product(table1, table2):
-    result_table = dict()
-    result_keys = []
-    result_keys.extend(table1.keys())
-    result_keys.extend(table2.keys())
-    for k in result_keys:
-        result_table[k] = []
-    len1 = count_table_size(table1)
-    len2 = count_table_size(table2)
-    for i in range(len1):
-        for j in range(len2):
-            row = dict()
-            for k in table1.keys():
-                row[k] = table1[k][i]
-            for k in table2.keys():
-                row[k] = table2[k][j]
-            insert_row_to_table(result_table, row)
-    return result_table
+    columns1 = get_columns_of_table(table1)
+    columns2 = get_columns_of_table(table2)
+    columns = []
+    columns.extend(columns1)
+    columns.extend(columns2)
+    rows = []
+    rows1 = get_rows_of_table(table1)
+    rows2 = get_rows_of_table(table2)
+    for row1 in rows1:
+        for row2 in rows2:
+            row = []
+            row.extend(row1)
+            row.extend(row2)
+            rows.append(row)
+    return db_io.make_table_with_columns_and_rows(columns, rows)
 
 
-def count_table_size(table):
+def from_execute(sql_str):
     """
-    return size of the table, count of rows in table
+    return a table filtered by where sub-query if exists
     """
-    return len(table[list(table.keys())[0]])
+    splited_sql = split_text_before(sql_str, ' where ')
+    where = None
+    table_names = splited_sql[0].strip().split(',')
+    table_names = [item.strip() for item in table_names]
+    if len(splited_sql[1].strip()) > 0:
+        where_sql = splited_sql[1].strip()
+        where = where_execute(where_sql)
+    database = db_io.read_database()
+
+    if len(table_names) == 1:
+        tbl = database[table_names[0]]
+    elif len(table_names) == 2:
+        table1 = database[table_names[0]]
+        table2 = database[table_names[1]]
+        tbl = cartesian_product(table1, table2)
+    else:
+        print('from sub-query only accept one or two table-name')
+        return 'error'
+    if where is not None:
+        tbl = where(tbl)
+    return tbl
 
 
-def insert_row_to_table(table, row):
-    for key in table.keys():
-        table[key].append(row[key])
+def select_execute(sql_str):
+    splited_sql = split_text_before(sql_str, ' from ')
+    columns = splited_sql[0].split(',')
+    columns = [item.strip() for item in columns]
+    from_sql = splited_sql[1].strip()
+    table = from_execute(from_sql)
+
+    def select_func(table):
+        if len(columns) == 1 and columns[0] == '*':
+            return table
+        result_table = {}
+        for col in columns:
+            if table.get(col) is not None:
+                result_table[col] = table[col]
+        return result_table
+
+    table = select_func(table)
     return table
 
 
-def compile_query(query_text):
+def squeal(sql_str):
     """
-    when the where clause has comma or empty_space in string value
-    need split the where clause first of all
+    execute sql_str as squeal language
+    as the squeal str always starts with select, so do select_execute
     """
-    has_where_clause = False
-    where_clause_text = None
-    splited_by_where = query_text.split('where')
-    if len(splited_by_where) > 1:
-        has_where_clause = True
-        where_clause_text = splited_by_where[1]
-        query_text = splited_by_where[0]
-        # split token from input by space and comma
-    tokens = list(filter(lambda x: len(x.strip()) > 0, re.split(r'[\s,]', query_text)))
-    query = Query('multi')
-    tmp_tokens = []
-
-    def create_sub_query():
-        """
-        create sub query like select, from, where
-        """
-        sub_query_type = tmp_tokens[0]
-        cls_map = {
-            'select': SelectQuery,
-            'from': FromQuery,
-            'where': WhereQuery
-        }
-        sub_query = cls_map[sub_query_type](sub_query_type)
-
-        if sub_query_type != 'where':
-            sub_query.items = tmp_tokens[1:]
-        else:
-            where_text = tmp_tokens[1]
-            has_string_re = r'\s*([a-zA-Z0-9\.]+?)\s*([=>])\s*\'([\w\W]*?)\'\s*'
-            no_string_re = r"\s*([a-zA-Z0-9\.]+?)\s*([=>])\s*([^']+)\s*"
-            m1 = re.match(has_string_re, where_text)
-            # judge where the where condition is like column_name1>/=columnname2 or column_name1>/='value1'
-            if m1:
-                sub_query.where_type = 'string'
-                sub_query.items = m1.groups()
-            else:
-                m2 = re.match(no_string_re, where_text)
-                sub_query.where_type = 'column'
-                sub_query.items = m2.groups()
-        tmp_tokens.clear()
-        query.items.append(sub_query)
-
-    token_keys = ['select', 'where', 'from']
-
-    for i in range(len(tokens)):
-        token = tokens[i]
-        tmp_tokens.append(token)
-        if i == len(tokens) - 1 or (tokens[i + 1] in token_keys):
-            create_sub_query()
-    if has_where_clause:
-        tmp_tokens = ['where', where_clause_text]
-        create_sub_query()
-    query.sort_clauses()
-    return query
+    select_pos = sql_str.find('select ')
+    select_sql = sql_str[(select_pos + len('select ')):]
+    return select_execute(select_sql)

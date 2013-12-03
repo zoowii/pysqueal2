@@ -16,8 +16,6 @@ We define "database" to mean this:
 Each key is the name of the .csv file without the extension.  Each value is
 the corresponding table as defined above.
 """
-import os
-import glob
 
 
 def print_csv(table):
@@ -46,28 +44,49 @@ def print_csv(table):
 # Write your read_table and read_database functions below.
 # Use glob.glob('*.csv') to return a list of csv filenames from
 #   the current directory.
+
+def get_table_name(filename):
+    # get table name from table-file name without extension name
+    dot_pos = filename.find('.')
+    table_name = filename[:dot_pos]
+    return table_name
+
+
 def read_database():
+    import glob
+
     files = glob.glob('*.csv')
-    database = dict()
-    for file in files:
-        table = read_table(open(file))
-        table_name = os.path.splitext(file)[0]
+    database = {}
+    for filename in files:
+        file = open(filename)
+        table = read_table(file)
+        file.close()
+        table_name = get_table_name(filename)
         database[table_name] = table
     return database
 
 
-def read_table(table_file):
-    lines = table_file.readlines()
-    cols = lines[0].split(',')
-    table = dict()
-    for i in range(len(cols)):
-        cols[i] = cols[i].strip()
-        table[cols[i]] = []
-    for i in range(1, len(lines)):
-        row = lines[i].split(',')
-        for j in range(len(cols)):
-            table[cols[j]].append(row[j].strip())
-    table_file.close()
+def make_table_with_columns_and_rows(columns, rows):
+    """
+    create a table dict with columns and rows
+    """
+    table = {}
+    for i in range(len(columns)):
+        col = columns[i]
+        if table.get(col) is None:
+            table[col] = []
+        l = table[col]
+        for row in rows:
+            l.append(row[i])
+    return table
+
+
+def read_table(file):
+    import csv
+
+    reader = csv.reader(file, delimiter=',', quotechar='|')
+    rows = [row for row in reader]
+    table = make_table_with_columns_and_rows(rows[0], rows[1:])
     return table
 
 
